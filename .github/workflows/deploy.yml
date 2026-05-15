@@ -1,0 +1,59 @@
+name: Deploy Data Lake Infrastructure
+
+on:
+  push:
+    branches: [main]
+
+env:
+  TF_VERSION: '1.6.0'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform/env/dev
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Apply
+        run: terraform apply -var-file="dev.tfvars" -auto-approve
+      
+      - name: Upload Scripts to Bronze
+        run: |
+          BRONZE_BUCKET="datalake-bronze-941508878188"
+          aws s3 cp ../../../archivos_para_bronze/Scripts/ s3://$BRONZE_BUCKET/scripts/ --recursive
+          aws s3 cp ../../../archivos_para_bronze/Data/ s3://$BRONZE_BUCKET/defunciones/ --recursive
+          echo "✅ Scripts y datos subidos"
+      
+      - name: Validate Resources
+        run: |
+          echo "=== VALIDANDO RECURSOS ==="
+          aws glue get-job --job-name validate_defunciones_gx && echo "✅ GX Job OK"
+          aws glue get-job --job-name bronze_to_silver_defunciones && echo "✅ Bronze→Silver OK"
+          aws glue get-job --job-name silver_to_gold_defunciones && echo "✅ Silver→Gold OK"
+          aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones && echo "✅ Step Function OK"
+      
+      - name: Test Pipeline
+        run: |
+          aws stepfunctions start-execution \
+            --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones \
+            --name "github-deploy-$(date +%s)" \
+            --region us-east-1
+          echo "✅ Pipeline ejecutado"
