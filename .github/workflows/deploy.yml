@@ -1,72 +1,24 @@
-name: Deploy Data Lake Infrastructure
-
-on:
-  push:
-    branches: [main]
-
-env:
-  TF_VERSION: '1.6.0'
-  AWS_REGION: 'us-east-1'
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./terraform/env/dev
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-      
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Configure Terraform to skip GPG verification
-        run: |
-          cat > ~/.terraformrc << EOF
-          provider_installation {
-            direct {
-              exclude = ["*/*"]
-            }
-          }
-          EOF
-      
-      - name: Terraform Init
-        run: terraform init -upgrade
-      
-      - name: Terraform Apply
-        run: terraform apply -var-file="dev.tfvars" -auto-approve
-      
-      - name: Upload Scripts and Data to Bronze
-        run: |
-          BRONZE_BUCKET="datalake-bronze-941508878188"
-          aws s3 cp ../../../archivos_para_bronze/Scripts/ s3://$BRONZE_BUCKET/scripts/ --recursive
-          aws s3 cp ../../../archivos_para_bronze/Data/ s3://$BRONZE_BUCKET/defunciones/ --recursive
-          echo "✅ Scripts y datos subidos"
-      
-      - name: Validate Resources
-        run: |
-          echo "=== VALIDANDO RECURSOS ==="
-          aws glue get-job --job-name validate_defunciones_gx || exit 1
-          aws glue get-job --job-name bronze_to_silver_defunciones || exit 1
-          aws glue get-job --job-name silver_to_gold_defunciones || exit 1
-          aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones || exit 1
-          echo "✅ TODOS LOS RECURSOS VALIDADOS"
-      
-      - name: Test Pipeline
-        run: |
-          aws stepfunctions start-execution \
-            --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones \
-            --name "github-deploy-$(date +%s)" \
-            --region ${{ env.AWS_REGION }}
-          echo "✅ Pipeline ejecutado"
+taller_terraform/
+├── .github/
+│   └── workflows/
+│       └── terraform.yml
+├── archivos_para_bronze/
+│   ├── Scripts/
+│   │   ├── validate_defunciones_gx.py
+│   │   ├── bronze_to_silver_defunciones.py
+│   │   └── silver_to_gold_defunciones.py
+│   ├── Data/
+│   │   └── defunciones.csv
+│   └── tests/                 (opcional, si tienes pruebas)
+└── terraform/
+    ├── modules/
+    │   ├── s3_lake/
+    │   ├── iam/
+    │   ├── glue/
+    │   └── step_function/
+    └── env/
+        └── dev/
+            ├── main.tf
+            ├── variables.tf
+            ├── outputs.tf
+            └── dev.tfvars
