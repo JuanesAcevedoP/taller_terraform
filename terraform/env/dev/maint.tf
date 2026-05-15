@@ -24,18 +24,33 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 # ============================================
-# BUCKETS S3 (usar existentes)
+# BUCKETS S3 — gestionados por Terraform
 # ============================================
-data "aws_s3_bucket" "bronze" {
-  bucket = "datalake-bronze-941508878188"
+module "bronze_bucket" {
+  source      = "../../modules/s3_lake"
+  project     = var.project
+  bucket_name = "bronze"
+  env         = var.env
+  account_id  = data.aws_caller_identity.current.account_id
+  tags        = var.tags
 }
 
-data "aws_s3_bucket" "silver" {
-  bucket = "datalake-silver-941508878188"
+module "silver_bucket" {
+  source      = "../../modules/s3_lake"
+  project     = var.project
+  bucket_name = "silver"
+  env         = var.env
+  account_id  = data.aws_caller_identity.current.account_id
+  tags        = var.tags
 }
 
-data "aws_s3_bucket" "gold" {
-  bucket = "datalake-gold-941508878188"
+module "gold_bucket" {
+  source      = "../../modules/s3_lake"
+  project     = var.project
+  bucket_name = "gold"
+  env         = var.env
+  account_id  = data.aws_caller_identity.current.account_id
+  tags        = var.tags
 }
 
 # ============================================
@@ -44,19 +59,18 @@ data "aws_s3_bucket" "gold" {
 module "glue_jobs" {
   source = "../../modules/glue"
 
-  project = var.project
-  env     = var.env
-
+  project       = var.project
+  env           = var.env
   glue_role_arn = "arn:aws:iam::941508878188:role/datalake-dev-glue-role"
 
-  raw_bucket     = data.aws_s3_bucket.bronze.bucket
-  staging_bucket = data.aws_s3_bucket.silver.bucket
-  gold_bucket    = data.aws_s3_bucket.gold.bucket
-  temp_bucket    = data.aws_s3_bucket.bronze.bucket
+  raw_bucket     = module.bronze_bucket.bucket_name   # ← antes: data.aws_s3_bucket.bronze.bucket
+  staging_bucket = module.silver_bucket.bucket_name   # ← antes: data.aws_s3_bucket.silver.bucket
+  gold_bucket    = module.gold_bucket.bucket_name     # ← antes: data.aws_s3_bucket.gold.bucket
+  temp_bucket    = module.bronze_bucket.bucket_name   # ← antes: data.aws_s3_bucket.bronze.bucket
 
-  gx_script_location               = "s3://${data.aws_s3_bucket.bronze.bucket}/scripts/validate_defunciones_gx.py"
-  bronze_to_silver_script_location = "s3://${data.aws_s3_bucket.bronze.bucket}/scripts/bronze_to_silver_defunciones.py"
-  silver_to_gold_script_location   = "s3://${data.aws_s3_bucket.bronze.bucket}/scripts/silver_to_gold_defunciones.py"
+  gx_script_location               = "s3://${module.bronze_bucket.bucket_name}/scripts/validate_defunciones_gx.py"
+  bronze_to_silver_script_location = "s3://${module.bronze_bucket.bucket_name}/scripts/bronze_to_silver_defunciones.py"
+  silver_to_gold_script_location   = "s3://${module.bronze_bucket.bucket_name}/scripts/silver_to_gold_defunciones.py"
 
   tags = var.tags
 }
