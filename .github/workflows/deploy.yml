@@ -19,7 +19,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # AWS Auth
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -27,31 +26,31 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Setup Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.6.0'
           terraform_wrapper: false
 
-      # Terraform Init
+      - name: Clean Terraform cache
+        run: |
+          rm -rf ~/.terraform.d/plugins
+          rm -rf .terraform/providers
+          rm -f .terraform.lock.hcl
+
       - name: Terraform Init
         run: terraform init -upgrade
 
-      # Terraform Validate
       - name: Terraform Validate
         run: terraform validate
 
-      # Terraform Plan
       - name: Terraform Plan
         run: terraform plan -var-file="dev.tfvars"
 
-      # Terraform Apply
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve -var-file="dev.tfvars"
 
-      # Obtener nombre del bucket Bronze
       - name: Get Bronze Bucket Name
         id: bronze_bucket
         if: github.ref == 'refs/heads/main'
@@ -60,7 +59,6 @@ jobs:
           echo "BRONZE_BUCKET=${BRONZE_BUCKET}" >> $GITHUB_ENV
           echo "📦 Bucket Bronze: ${BRONZE_BUCKET}"
 
-      # Subir Scripts de Glue (3 jobs)
       - name: Upload Glue Scripts
         if: github.ref == 'refs/heads/main'
         run: |
@@ -70,7 +68,6 @@ jobs:
           aws s3 cp ../../archivos_para_bronze/Scripts/silver_to_gold_defunciones.py s3://${{ env.BRONZE_BUCKET }}/scripts/silver_to_gold_defunciones.py
           echo "✅ Scripts subidos correctamente"
 
-      # Subir Dataset CSV a Bronze
       - name: Upload Dataset to Bronze
         if: github.ref == 'refs/heads/main'
         run: |
@@ -78,7 +75,6 @@ jobs:
           aws s3 cp ../../archivos_para_bronze/Data/defunciones.csv s3://${{ env.BRONZE_BUCKET }}/defunciones/defunciones.csv
           echo "✅ Dataset subido correctamente"
 
-      # Validar recursos en AWS
       - name: Validate AWS Resources
         if: github.ref == 'refs/heads/main'
         run: |
@@ -86,7 +82,6 @@ jobs:
           echo "=== VALIDANDO RECURSOS EN AWS ==="
           echo "========================================="
           
-          # Validar buckets
           BRONZE_BUCKET=$(terraform output -raw bronze_bucket_name)
           SILVER_BUCKET=$(terraform output -raw silver_bucket_name)
           GOLD_BUCKET=$(terraform output -raw gold_bucket_name)
@@ -96,26 +91,16 @@ jobs:
           aws s3 ls s3://$SILVER_BUCKET --region ${{ secrets.AWS_REGION }} && echo "   ✅ Silver OK" || exit 1
           aws s3 ls s3://$GOLD_BUCKET --region ${{ secrets.AWS_REGION }} && echo "   ✅ Gold OK" || exit 1
           
-          echo ""
-          echo "2. Validando Scripts en S3..."
-          aws s3 ls s3://$BRONZE_BUCKET/scripts/ --region ${{ secrets.AWS_REGION }} || exit 1
-          
-          echo ""
-          echo "3. Validando Glue Jobs..."
+          echo "2. Validando Glue Jobs..."
           aws glue get-job --job-name validate_defunciones_gx --region ${{ secrets.AWS_REGION }} && echo "   ✅ validate_defunciones_gx" || exit 1
           aws glue get-job --job-name bronze_to_silver_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ bronze_to_silver_defunciones" || exit 1
           aws glue get-job --job-name silver_to_gold_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ silver_to_gold_defunciones" || exit 1
           
-          echo ""
-          echo "4. Validando Step Function..."
+          echo "3. Validando Step Function..."
           aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:pipeline_datalake_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ pipeline_datalake_defunciones" || exit 1
           
-          echo ""
-          echo "========================================="
           echo "✅ TODOS LOS RECURSOS VALIDADOS"
-          echo "========================================="
 
-      # Ejecutar Step Function de prueba
       - name: Test Step Function Execution
         if: github.ref == 'refs/heads/main'
         run: |

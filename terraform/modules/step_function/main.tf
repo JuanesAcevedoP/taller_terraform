@@ -14,6 +14,8 @@ resource "aws_iam_role" "stepfunctions_role" {
       }
     ]
   })
+
+  # SIN TAGS (para evitar error de permisos)
 }
 
 # Política para ejecutar Glue jobs
@@ -128,5 +130,5 @@ resource "aws_sfn_state_machine" "defunciones_pipeline" {
     }
   })
 
-  # tags = var.tags
+  # SIN TAGS (para evitar error de permisos)
 }
