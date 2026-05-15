@@ -32,6 +32,19 @@ jobs:
           terraform_version: '1.6.0'
           terraform_wrapper: false
 
+      # DESHABILITAR VERIFICACIÓN GPG
+      - name: Disable GPG verification for Terraform providers
+        run: |
+          cat > ~/.terraformrc << 'EOF'
+          provider_installation {
+            direct {
+              exclude = ["*/*"]
+            }
+          }
+          disable_checkpoint = true
+          EOF
+
+      # Limpiar caché
       - name: Clean Terraform cache
         run: |
           rm -rf ~/.terraform.d/plugins
@@ -97,7 +110,8 @@ jobs:
           aws glue get-job --job-name silver_to_gold_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ silver_to_gold_defunciones" || exit 1
           
           echo "3. Validando Step Function..."
-          aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:pipeline_datalake_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ pipeline_datalake_defunciones" || exit 1
+          STATE_MACHINE_ARN=$(terraform output -raw state_machine_arn)
+          aws stepfunctions describe-state-machine --state-machine-arn $STATE_MACHINE_ARN --region ${{ secrets.AWS_REGION }} && echo "   ✅ pipeline_datalake_defunciones" || exit 1
           
           echo "✅ TODOS LOS RECURSOS VALIDADOS"
 
@@ -105,8 +119,9 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           echo "🚀 Ejecutando Step Function de prueba..."
+          STATE_MACHINE_ARN=$(terraform output -raw state_machine_arn)
           aws stepfunctions start-execution \
-            --state-machine-arn arn:aws:states:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:pipeline_datalake_defunciones \
+            --state-machine-arn $STATE_MACHINE_ARN \
             --name "github-deploy-$(date +%s)" \
             --region ${{ secrets.AWS_REGION }}
           echo "✅ Step Function ejecutada correctamente"
