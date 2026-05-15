@@ -1,11 +1,11 @@
-output "bronze_bucket_name" {
-  value = module.bronze_bucket.bucket_name
+output "bucket_id" {
+  value = aws_s3_bucket.this.id
 }
 
-output "silver_bucket_name" {
-  value = module.silver_bucket.bucket_name
+output "bucket_arn" {
+  value = aws_s3_bucket.this.arn
 }
 
-output "gold_bucket_name" {
-  value = module.gold_bucket.bucket_name
+output "bucket_name" {
+  value = aws_s3_bucket.this.bucket
 }

@@ -1,13 +1,13 @@
 output "bronze_bucket_name" {
-  value = data.aws_s3_bucket.bronze.bucket
+  value = module.bronze_bucket.bucket_name
 }
 
 output "silver_bucket_name" {
-  value = data.aws_s3_bucket.silver.bucket
+  value = module.silver_bucket.bucket_name
 }
 
 output "gold_bucket_name" {
-  value = data.aws_s3_bucket.gold.bucket
+  value = module.gold_bucket.bucket_name
 }
 
 output "gx_job_name" {
