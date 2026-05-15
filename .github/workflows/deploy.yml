@@ -18,9 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - uses: hashicorp/setup-terraform@v3
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
       
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -29,13 +31,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
+      - name: Clean provider cache
+        run: |
+          rm -rf ~/.terraform.d/plugins
+          rm -rf .terraform/providers
+          rm -f .terraform.lock.hcl
+      
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -upgrade
       
       - name: Terraform Apply
         run: terraform apply -var-file="dev.tfvars" -auto-approve
       
-      - name: Upload Scripts to Bronze
+      - name: Upload Scripts and Data to Bronze
         run: |
           BRONZE_BUCKET="datalake-bronze-941508878188"
           aws s3 cp ../../../archivos_para_bronze/Scripts/ s3://$BRONZE_BUCKET/scripts/ --recursive
@@ -45,15 +53,16 @@ jobs:
       - name: Validate Resources
         run: |
           echo "=== VALIDANDO RECURSOS ==="
-          aws glue get-job --job-name validate_defunciones_gx && echo "✅ GX Job OK"
-          aws glue get-job --job-name bronze_to_silver_defunciones && echo "✅ Bronze→Silver OK"
-          aws glue get-job --job-name silver_to_gold_defunciones && echo "✅ Silver→Gold OK"
-          aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones && echo "✅ Step Function OK"
+          aws glue get-job --job-name validate_defunciones_gx || exit 1
+          aws glue get-job --job-name bronze_to_silver_defunciones || exit 1
+          aws glue get-job --job-name silver_to_gold_defunciones || exit 1
+          aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones || exit 1
+          echo "✅ TODOS LOS RECURSOS VALIDADOS"
       
       - name: Test Pipeline
         run: |
           aws stepfunctions start-execution \
             --state-machine-arn arn:aws:states:us-east-1:941508878188:stateMachine:pipeline_datalake_defunciones \
             --name "github-deploy-$(date +%s)" \
-            --region us-east-1
+            --region ${{ env.AWS_REGION }}
           echo "✅ Pipeline ejecutado"
