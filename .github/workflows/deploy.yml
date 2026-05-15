@@ -73,7 +73,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           echo "📤 Subiendo datos a s3://${{ env.BRONZE_BUCKET }}/defunciones/"
-          aws s3 cp ../../archivos_para_bronze/Data/defunciones.csv s3://${{ env.BRONZE_BUCKET }}/defunciones/defunciones.csv
+          aws s3 cp ../../archivos_para_bronze/data/defunciones_15000.csv s3://${{ env.BRONZE_BUCKET }}/defunciones/defunciones.csv
           echo "✅ Dataset subido correctamente"
 
       - name: Validate AWS Resources
