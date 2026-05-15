@@ -1,24 +1,127 @@
-taller_terraform/
-├── .github/
-│   └── workflows/
-│       └── terraform.yml
-├── archivos_para_bronze/
-│   ├── Scripts/
-│   │   ├── validate_defunciones_gx.py
-│   │   ├── bronze_to_silver_defunciones.py
-│   │   └── silver_to_gold_defunciones.py
-│   ├── Data/
-│   │   └── defunciones.csv
-│   └── tests/                 (opcional, si tienes pruebas)
-└── terraform/
-    ├── modules/
-    │   ├── s3_lake/
-    │   ├── iam/
-    │   ├── glue/
-    │   └── step_function/
-    └── env/
-        └── dev/
-            ├── main.tf
-            ├── variables.tf
-            ├── outputs.tf
-            └── dev.tfvars
+name: Deploy Data Lake Terraform - Defunciones
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - feature/actions_back
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: terraform/env/dev
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # AWS Auth
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.6.0'
+          terraform_wrapper: false
+
+      # Terraform Init
+      - name: Terraform Init
+        run: terraform init -upgrade
+
+      # Terraform Validate
+      - name: Terraform Validate
+        run: terraform validate
+
+      # Terraform Plan
+      - name: Terraform Plan
+        run: terraform plan -var-file="dev.tfvars"
+
+      # Terraform Apply
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve -var-file="dev.tfvars"
+
+      # Obtener nombre del bucket Bronze
+      - name: Get Bronze Bucket Name
+        id: bronze_bucket
+        if: github.ref == 'refs/heads/main'
+        run: |
+          BRONZE_BUCKET=$(terraform output -raw bronze_bucket_name 2>/dev/null | tr -d '\r' | xargs)
+          echo "BRONZE_BUCKET=${BRONZE_BUCKET}" >> $GITHUB_ENV
+          echo "📦 Bucket Bronze: ${BRONZE_BUCKET}"
+
+      # Subir Scripts de Glue (3 jobs)
+      - name: Upload Glue Scripts
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "📤 Subiendo scripts a s3://${{ env.BRONZE_BUCKET }}/scripts/"
+          aws s3 cp ../../archivos_para_bronze/Scripts/validate_defunciones_gx.py s3://${{ env.BRONZE_BUCKET }}/scripts/validate_defunciones_gx.py
+          aws s3 cp ../../archivos_para_bronze/Scripts/bronze_to_silver_defunciones.py s3://${{ env.BRONZE_BUCKET }}/scripts/bronze_to_silver_defunciones.py
+          aws s3 cp ../../archivos_para_bronze/Scripts/silver_to_gold_defunciones.py s3://${{ env.BRONZE_BUCKET }}/scripts/silver_to_gold_defunciones.py
+          echo "✅ Scripts subidos correctamente"
+
+      # Subir Dataset CSV a Bronze
+      - name: Upload Dataset to Bronze
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "📤 Subiendo datos a s3://${{ env.BRONZE_BUCKET }}/defunciones/"
+          aws s3 cp ../../archivos_para_bronze/Data/defunciones.csv s3://${{ env.BRONZE_BUCKET }}/defunciones/defunciones.csv
+          echo "✅ Dataset subido correctamente"
+
+      # Validar recursos en AWS
+      - name: Validate AWS Resources
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "========================================="
+          echo "=== VALIDANDO RECURSOS EN AWS ==="
+          echo "========================================="
+          
+          # Validar buckets
+          BRONZE_BUCKET=$(terraform output -raw bronze_bucket_name)
+          SILVER_BUCKET=$(terraform output -raw silver_bucket_name)
+          GOLD_BUCKET=$(terraform output -raw gold_bucket_name)
+          
+          echo "1. Validando Buckets S3..."
+          aws s3 ls s3://$BRONZE_BUCKET --region ${{ secrets.AWS_REGION }} && echo "   ✅ Bronze OK" || exit 1
+          aws s3 ls s3://$SILVER_BUCKET --region ${{ secrets.AWS_REGION }} && echo "   ✅ Silver OK" || exit 1
+          aws s3 ls s3://$GOLD_BUCKET --region ${{ secrets.AWS_REGION }} && echo "   ✅ Gold OK" || exit 1
+          
+          echo ""
+          echo "2. Validando Scripts en S3..."
+          aws s3 ls s3://$BRONZE_BUCKET/scripts/ --region ${{ secrets.AWS_REGION }} || exit 1
+          
+          echo ""
+          echo "3. Validando Glue Jobs..."
+          aws glue get-job --job-name validate_defunciones_gx --region ${{ secrets.AWS_REGION }} && echo "   ✅ validate_defunciones_gx" || exit 1
+          aws glue get-job --job-name bronze_to_silver_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ bronze_to_silver_defunciones" || exit 1
+          aws glue get-job --job-name silver_to_gold_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ silver_to_gold_defunciones" || exit 1
+          
+          echo ""
+          echo "4. Validando Step Function..."
+          aws stepfunctions describe-state-machine --state-machine-arn arn:aws:states:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:pipeline_datalake_defunciones --region ${{ secrets.AWS_REGION }} && echo "   ✅ pipeline_datalake_defunciones" || exit 1
+          
+          echo ""
+          echo "========================================="
+          echo "✅ TODOS LOS RECURSOS VALIDADOS"
+          echo "========================================="
+
+      # Ejecutar Step Function de prueba
+      - name: Test Step Function Execution
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "🚀 Ejecutando Step Function de prueba..."
+          aws stepfunctions start-execution \
+            --state-machine-arn arn:aws:states:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:pipeline_datalake_defunciones \
+            --name "github-deploy-$(date +%s)" \
+            --region ${{ secrets.AWS_REGION }}
+          echo "✅ Step Function ejecutada correctamente"
